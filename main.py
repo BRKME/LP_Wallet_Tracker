@@ -44,9 +44,9 @@ class WalletTracker:
     # ============ DATA FETCHING ============
     
     async def get_wallet_balance_debank(self, address: str) -> dict:
-        """Fetch wallet balance from DeBank API"""
+        """Fetch wallet balance from DeBank Pro API (paid)"""
         if not DEBANK_API_KEY:
-            logger.warning("DEBANK_API_KEY not set")
+            logger.info("DEBANK_API_KEY not set, skipping Pro API")
             return None
         
         headers = {
@@ -62,7 +62,7 @@ class WalletTracker:
                     data = await resp.json()
                     total_usd = data.get('total_usd_value', 0)
                 else:
-                    logger.error(f"DeBank API error: {resp.status}")
+                    logger.error(f"DeBank Pro API error: {resp.status}")
                     return None
             
             # Get token list for whitelist check
@@ -79,59 +79,89 @@ class WalletTracker:
             }
         
         except Exception as e:
-            logger.error(f"Error fetching DeBank data: {e}")
+            logger.error(f"Error fetching DeBank Pro data: {e}")
             return None
     
-    async def get_wallet_balance_ankr(self, address: str) -> dict:
-        """Fallback: Fetch wallet balance from Ankr API (free)"""
+    async def get_wallet_balance_debank_public(self, address: str) -> dict:
+        """Fetch wallet balance from DeBank public API (free)"""
         try:
-            # Ankr Advanced API - free tier
-            url = "https://rpc.ankr.com/multichain"
-            payload = {
-                "jsonrpc": "2.0",
-                "method": "ankr_getAccountBalance",
-                "params": {
-                    "walletAddress": address,
-                    "blockchain": ["eth", "bsc", "arbitrum", "polygon"]
-                },
-                "id": 1
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/json",
+                "Origin": "https://debank.com",
+                "Referer": "https://debank.com/"
             }
             
-            async with self.session.post(url, json=payload, timeout=30) as resp:
+            # Get total balance
+            url = f"https://api.debank.com/user/total_balance?addr={address.lower()}"
+            async with self.session.get(url, headers=headers, timeout=30) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    result = data.get('result', {})
-                    total_usd = float(result.get('totalBalanceUsd', '0'))
-                    assets = result.get('assets', [])
-                    
-                    tokens = []
-                    for asset in assets:
-                        tokens.append({
-                            'symbol': asset.get('tokenSymbol', ''),
-                            'amount': float(asset.get('balance', 0)),
-                            'price': float(asset.get('tokenPrice', 0)),
-                            'value': float(asset.get('balanceUsd', 0))
-                        })
-                    
-                    return {
-                        "total_usd": total_usd,
-                        "tokens": tokens
-                    }
-        except Exception as e:
-            logger.error(f"Error fetching Ankr data: {e}")
+                    total_usd = data.get('data', {}).get('total_usd_value', 0)
+                    if total_usd is None:
+                        total_usd = 0
+                    logger.info(f"DeBank public API: ${total_usd:,.2f}")
+                else:
+                    text = await resp.text()
+                    logger.error(f"DeBank public API error: {resp.status} - {text[:200]}")
+                    return None
+            
+            # Get token list
+            tokens = []
+            url = f"https://api.debank.com/user/all_token_list?addr={address.lower()}"
+            async with self.session.get(url, headers=headers, timeout=30) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    tokens = data.get('data', []) or []
+            
+            return {
+                "total_usd": total_usd,
+                "tokens": tokens
+            }
         
-        return None
+        except Exception as e:
+            logger.error(f"Error fetching DeBank public data: {e}")
+            return None
+    
+    async def get_wallet_balance_zapper(self, address: str) -> dict:
+        """Fallback: Fetch from Zapper (free tier)"""
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/json"
+            }
+            
+            url = f"https://api.zapper.xyz/v2/balances?addresses%5B%5D={address}"
+            async with self.session.get(url, headers=headers, timeout=30) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # Parse Zapper response
+                    total_usd = sum(item.get('balanceUSD', 0) for item in data.get('balances', []))
+                    return {"total_usd": total_usd, "tokens": []}
+                else:
+                    logger.warning(f"Zapper API error: {resp.status}")
+                    return None
+        except Exception as e:
+            logger.warning(f"Zapper API failed: {e}")
+            return None
     
     async def get_wallet_balance(self, address: str) -> dict:
         """Get wallet balance, trying multiple sources"""
-        # Try DeBank first
+        # Try DeBank Pro API first (if key set)
         result = await self.get_wallet_balance_debank(address)
-        if result:
+        if result and result.get('total_usd', 0) > 0:
+            logger.info("Using DeBank Pro API")
             return result
         
-        # Fallback to Ankr
-        logger.info("Falling back to Ankr API")
-        result = await self.get_wallet_balance_ankr(address)
+        # Try DeBank public API (free)
+        logger.info("Trying DeBank public API...")
+        result = await self.get_wallet_balance_debank_public(address)
+        if result and result.get('total_usd', 0) >= 0:
+            return result
+        
+        # Fallback to Zapper
+        logger.info("Falling back to Zapper API")
+        result = await self.get_wallet_balance_zapper(address)
         if result:
             return result
         
