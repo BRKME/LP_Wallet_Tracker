@@ -43,6 +43,44 @@ class WalletTracker:
     
     # ============ DATA FETCHING ============
     
+    async def get_wallet_balance_covalent(self, address: str) -> dict:
+        """Fetch wallet balance from Covalent API (free tier)"""
+        api_key = os.getenv('COVALENT_API_KEY', 'cqt_rQy7cVXgKJhbRwqPJTfFFDCGWbgP')  # Free demo key
+        
+        try:
+            # Chains to check: ETH=1, BSC=56, Arbitrum=42161, Polygon=137, Base=8453
+            chains = [1, 56, 42161, 137, 8453]
+            total_usd = 0
+            all_tokens = []
+            
+            for chain_id in chains:
+                url = f"https://api.covalenthq.com/v1/{chain_id}/address/{address}/balances_v2/"
+                params = {"key": api_key, "quote-currency": "USD"}
+                
+                async with self.session.get(url, params=params, timeout=30) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        items = data.get('data', {}).get('items', [])
+                        
+                        for item in items:
+                            quote = item.get('quote', 0) or 0
+                            if quote > 0.01:  # Skip dust
+                                total_usd += quote
+                                all_tokens.append({
+                                    'symbol': item.get('contract_ticker_symbol', ''),
+                                    'value': quote,
+                                    'chain_id': chain_id
+                                })
+                    else:
+                        logger.warning(f"Covalent chain {chain_id}: {resp.status}")
+            
+            logger.info(f"Covalent API total: ${total_usd:,.2f}")
+            return {"total_usd": total_usd, "tokens": all_tokens}
+            
+        except Exception as e:
+            logger.error(f"Covalent API error: {e}")
+            return None
+    
     async def get_wallet_balance_debank(self, address: str) -> dict:
         """Fetch wallet balance from DeBank Pro API (paid)"""
         if not DEBANK_API_KEY:
@@ -147,7 +185,13 @@ class WalletTracker:
     
     async def get_wallet_balance(self, address: str) -> dict:
         """Get wallet balance, trying multiple sources"""
-        # Try DeBank Pro API first (if key set)
+        # Try Covalent first (most reliable for GitHub Actions)
+        logger.info("Trying Covalent API...")
+        result = await self.get_wallet_balance_covalent(address)
+        if result and result.get('total_usd', 0) > 0:
+            return result
+        
+        # Try DeBank Pro API (if key set)
         result = await self.get_wallet_balance_debank(address)
         if result and result.get('total_usd', 0) > 0:
             logger.info("Using DeBank Pro API")
