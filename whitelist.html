@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta property="og:title" content="LP Белый список токенов">
+    <meta property="og:description" content="Разрешённые активы для детских инвестиционных портфелей">
+    <title>LP Белый список токенов</title>
+    <style>
+        body {
+            font-family: 'Georgia', serif;
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            line-height: 1.6;
+            color: #444;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        h1 {
+            text-align: center;
+            color: #1a1a2e;
+            font-size: 2em;
+            margin-bottom: 10px;
+            font-weight: normal;
+        }
+        .emoji {
+            text-align: center;
+            font-size: 3em;
+            margin: 20px 0;
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            font-size: 1em;
+            margin-bottom: 30px;
+        }
+        .category {
+            margin: 25px 0;
+            padding: 20px;
+            border-radius: 10px;
+            background: #f8f9fa;
+        }
+        .category-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .category-icon {
+            font-size: 1.5em;
+            margin-right: 10px;
+        }
+        .category-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #1a1a2e;
+        }
+        .tokens {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .token {
+            background: white;
+            border: 2px solid #e0e0e0;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-family: monospace;
+            font-size: 1em;
+            color: #333;
+            transition: all 0.2s;
+        }
+        .token:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+        }
+        .layer1 { border-left: 4px solid #f7931a; }
+        .layer1 .token:hover { border-color: #f7931a; }
+        
+        .trading { border-left: 4px solid #00d4aa; }
+        .trading .token:hover { border-color: #00d4aa; }
+        
+        .defi { border-left: 4px solid #627eea; }
+        .defi .token:hover { border-color: #627eea; }
+        
+        .ai { border-left: 4px solid #9945ff; }
+        .ai .token:hover { border-color: #9945ff; }
+        
+        .privacy { border-left: 4px solid #f4b728; }
+        .privacy .token:hover { border-color: #f4b728; }
+        
+        .stablecoins { border-left: 4px solid #26a17b; }
+        .stablecoins .token:hover { border-color: #26a17b; }
+        
+        .rules {
+            margin-top: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            color: white;
+        }
+        .rules h3 {
+            margin-top: 0;
+            font-weight: normal;
+        }
+        .rules ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .rules li {
+            margin: 8px 0;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #888;
+            font-size: 0.9em;
+        }
+        .updated {
+            text-align: center;
+            color: #aaa;
+            font-size: 0.8em;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="emoji">📋</div>
+        <h1>Белый список токенов</h1>
+        <p class="subtitle">Разрешённые активы для LP портфелей</p>
+        
+        <div class="category layer1">
+            <div class="category-header">
+                <span class="category-icon">🔶</span>
+                <span class="category-title">Layer 1</span>
+            </div>
+            <div class="tokens">
+                <span class="token">BTC</span>
+                <span class="token">ETH</span>
+                <span class="token">BNB</span>
+                <span class="token">WBTC</span>
+                <span class="token">WETH</span>
+            </div>
+        </div>
+        
+        <div class="category trading">
+            <div class="category-header">
+                <span class="category-icon">⚡</span>
+                <span class="category-title">Trading Infrastructure</span>
+            </div>
+            <div class="tokens">
+                <span class="token">HYPE</span>
+                <span class="token">ASTER</span>
+                <span class="token">PUMP</span>
+            </div>
+        </div>
+        
+        <div class="category defi">
+            <div class="category-header">
+                <span class="category-icon">🏦</span>
+                <span class="category-title">DeFi Credit</span>
+            </div>
+            <div class="tokens">
+                <span class="token">MORPHO</span>
+            </div>
+        </div>
+        
+        <div class="category ai">
+            <div class="category-header">
+                <span class="category-icon">🤖</span>
+                <span class="category-title">AI Narrative</span>
+            </div>
+            <div class="tokens">
+                <span class="token">TAO</span>
+            </div>
+        </div>
+        
+        <div class="category privacy">
+            <div class="category-header">
+                <span class="category-icon">🔒</span>
+                <span class="category-title">Privacy Hedge</span>
+            </div>
+            <div class="tokens">
+                <span class="token">ZEC</span>
+            </div>
+        </div>
+        
+        <div class="category stablecoins">
+            <div class="category-header">
+                <span class="category-icon">💵</span>
+                <span class="category-title">Stablecoins</span>
+            </div>
+            <div class="tokens">
+                <span class="token">USDT</span>
+                <span class="token">USDC</span>
+                <span class="token">DAI</span>
+                <span class="token">BUSD</span>
+                <span class="token">USD+</span>
+                <span class="token">USDe</span>
+            </div>
+        </div>
+        
+        <div class="rules">
+            <h3>📋 Инвестиционные правила</h3>
+            <ul>
+                <li>No Margin</li>
+                <li>Только некоррелируемые позиции</li>
+                <li>Не более 5 LP пулов</li>
+                <li>Страховка через Beefy</li>
+                <li>Проверка LP через AI</li>
+            </ul>
+        </div>
+        
+        <p class="updated">Обновлено: Март 2026</p>
+        
+        <div class="footer">
+            💎 LP Wallet Tracker
+        </div>
+    </div>
+</body>
+</html>

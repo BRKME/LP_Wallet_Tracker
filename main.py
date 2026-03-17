@@ -443,6 +443,7 @@ class WalletTracker:
         # Links
         msg += f"\n🔗 <a href='https://debank.com/profile/{WALLETS['Аркаша']}'>DeBank Аркаша</a>"
         msg += f" | <a href='https://debank.com/profile/{WALLETS['Марта']}'>DeBank Марта</a>"
+        msg += f"\n📋 <a href='https://brkme.github.io/LP_Wallet_Tracker/whitelist.html'>Белый список токенов</a>"
         
         return msg
     
