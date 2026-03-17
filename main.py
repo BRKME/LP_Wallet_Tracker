@@ -43,6 +43,63 @@ class WalletTracker:
     
     # ============ DATA FETCHING ============
     
+    async def get_wallet_balance_scrape(self, address: str) -> dict:
+        """Scrape wallet balance directly from DeBank website"""
+        try:
+            from playwright.async_api import async_playwright
+            
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                
+                url = f"https://debank.com/profile/{address}"
+                logger.info(f"Scraping {url}")
+                
+                await page.goto(url, wait_until="networkidle", timeout=60000)
+                
+                # Wait for balance to load
+                await page.wait_for_selector('[class*="HeaderInfo_totalAssetInner"]', timeout=30000)
+                
+                # Get total balance text
+                balance_el = await page.query_selector('[class*="HeaderInfo_totalAssetInner"]')
+                if balance_el:
+                    balance_text = await balance_el.inner_text()
+                    # Parse "$12,345.67" -> 12345.67
+                    balance_text = balance_text.replace('$', '').replace(',', '').strip()
+                    total_usd = float(balance_text)
+                    logger.info(f"Scraped balance: ${total_usd:,.2f}")
+                else:
+                    total_usd = 0
+                
+                # Get tokens (optional, for whitelist check)
+                tokens = []
+                token_elements = await page.query_selector_all('[class*="TokenCell_tokenCell"]')
+                for el in token_elements[:20]:  # Limit to 20
+                    try:
+                        symbol_el = await el.query_selector('[class*="TokenCell_tokenSymbol"]')
+                        value_el = await el.query_selector('[class*="TokenCell_tokenValue"]')
+                        if symbol_el and value_el:
+                            symbol = await symbol_el.inner_text()
+                            value_text = await value_el.inner_text()
+                            value_text = value_text.replace('$', '').replace(',', '').strip()
+                            tokens.append({
+                                'symbol': symbol,
+                                'value': float(value_text) if value_text else 0
+                            })
+                    except:
+                        pass
+                
+                await browser.close()
+                
+                return {"total_usd": total_usd, "tokens": tokens}
+                
+        except ImportError:
+            logger.warning("Playwright not installed, skipping scrape")
+            return None
+        except Exception as e:
+            logger.error(f"Scraping error: {e}")
+            return None
+    
     async def get_wallet_balance_covalent(self, address: str) -> dict:
         """Fetch wallet balance from Covalent API (free tier)"""
         api_key = os.getenv('COVALENT_API_KEY', 'cqt_rQy7cVXgKJhbRwqPJTfFFDCGWbgP')  # Free demo key
@@ -185,7 +242,13 @@ class WalletTracker:
     
     async def get_wallet_balance(self, address: str) -> dict:
         """Get wallet balance, trying multiple sources"""
-        # Try Covalent first (most reliable for GitHub Actions)
+        # Try scraping DeBank directly (most accurate)
+        logger.info("Trying to scrape DeBank...")
+        result = await self.get_wallet_balance_scrape(address)
+        if result and result.get('total_usd', 0) > 0:
+            return result
+        
+        # Try Covalent API (reliable for GitHub Actions)
         logger.info("Trying Covalent API...")
         result = await self.get_wallet_balance_covalent(address)
         if result and result.get('total_usd', 0) > 0:
