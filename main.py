@@ -398,52 +398,48 @@ class WalletTracker:
     
     def build_message(self, record: dict, last_week: dict, month_start: dict, whitelist_report: dict) -> str:
         """Build the Telegram message"""
-        today = datetime.now().strftime("%d.%m.%Y")
+        now = datetime.now()
+        today = now.strftime("%d.%m.%Y")
+        week_num = now.isocalendar()[1]
         
-        msg = f"📊 <b>LP Portfolio Report</b>\n"
-        msg += f"📅 {today}\n\n"
+        msg = f"📅 {today} · Неделя {week_num}\n\n"
+        msg += f"<b>Накопления детей</b>\n\n"
         
         # Total Plan vs Fact
-        msg += f"<b>💰 ИТОГО:</b>\n"
+        msg += f"<b>ИТОГО:</b>\n"
         msg += f"├ План: {self.format_number(record['plan_usd'])}\n"
         msg += f"├ Факт: {self.format_number(record['total_usd'])}\n"
         
         diff = record['total_usd'] - record['plan_usd']
         diff_pct = (diff / record['plan_usd'] * 100) if record['plan_usd'] > 0 else 0
-        emoji = "✅" if diff >= 0 else "⚠️"
         sign = "+" if diff >= 0 else ""
-        msg += f"└ {emoji} Разница: {sign}${diff:,.0f} ({sign}{diff_pct:.1f}%)\n\n"
+        msg += f"└ Разница: {sign}${diff:,.0f} ({sign}{diff_pct:.1f}%)\n"
         
         # Per-wallet breakdown with plan/fact
-        msg += f"<b>👛 По кошелькам:</b>\n"
         for name, data in record['wallets'].items():
             wallet_plan = data.get('plan_usd', 0)
             wallet_fact = data['total_usd']
             wallet_diff = wallet_fact - wallet_plan
-            wallet_emoji = "✅" if wallet_diff >= 0 else "⚠️"
+            wallet_pct = (wallet_diff / wallet_plan * 100) if wallet_plan > 0 else 0
             wallet_sign = "+" if wallet_diff >= 0 else ""
             
             msg += f"\n<b>{name}:</b>\n"
             msg += f"├ План: {self.format_number(wallet_plan)}\n"
             msg += f"├ Факт: {self.format_number(wallet_fact)}\n"
-            msg += f"└ {wallet_emoji} {wallet_sign}${wallet_diff:,.0f}\n"
-        
-        msg += "\n"
+            msg += f"└ {wallet_sign}${wallet_diff:,.0f} ({wallet_sign}{wallet_pct:.1f}%)\n"
         
         # Weekly change
         if last_week:
-            msg += f"<b>📈 Изменения за неделю:</b>\n"
-            msg += f"└ {self.format_change(record['total_usd'], last_week['total_usd'])}\n\n"
+            msg += f"\n<b>За неделю:</b> {self.format_change(record['total_usd'], last_week['total_usd'])}\n"
         
         # Monthly change (first week only)
         if self.is_first_week_of_month() and month_start:
-            msg += f"<b>📆 Изменения за месяц:</b>\n"
-            msg += f"└ {self.format_change(record['total_usd'], month_start['total_usd'])}\n\n"
+            msg += f"<b>За месяц:</b> {self.format_change(record['total_usd'], month_start['total_usd'])}\n"
         
         # Links
-        msg += f"\n🔗 <a href='https://debank.com/profile/{WALLETS['Аркаша']}'>DeBank Аркаша</a>"
-        msg += f" | <a href='https://debank.com/profile/{WALLETS['Марта']}'>DeBank Марта</a>"
-        msg += f"\n📋 <a href='https://brkme.github.io/LP_Wallet_Tracker/whitelist.html'>Белый список токенов</a>"
+        msg += f"\n<a href='https://debank.com/profile/{WALLETS['Аркаша']}'>Аркаша</a>"
+        msg += f" · <a href='https://debank.com/profile/{WALLETS['Марта']}'>Марта</a>"
+        msg += f" · <a href='https://brkme.github.io/LP_Wallet_Tracker/whitelist.html'>Белый список</a>"
         
         return msg
     
