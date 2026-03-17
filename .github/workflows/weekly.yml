@@ -16,13 +16,6 @@ jobs:
           ref: main
           fetch-depth: 0
       
-      - name: Debug - show commit
-        run: |
-          echo "Current commit:"
-          git log --oneline -1
-          echo "Checking for scrape function:"
-          grep -c "get_wallet_balance_scrape" main.py || echo "NOT FOUND"
-      
       - name: Setup Python
         uses: actions/setup-python@v5
         with:

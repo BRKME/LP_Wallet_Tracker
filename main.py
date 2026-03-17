@@ -64,9 +64,12 @@ class WalletTracker:
                 balance_el = await page.query_selector('[class*="HeaderInfo_totalAssetInner"]')
                 if balance_el:
                     balance_text = await balance_el.inner_text()
-                    # Parse "$12,345.67" -> 12345.67
-                    balance_text = balance_text.replace('$', '').replace(',', '').strip()
-                    total_usd = float(balance_text)
+                    # Parse "$12,345.67\n+0.79%" -> 12345.67
+                    # Take first line only
+                    first_line = balance_text.split('\n')[0].strip()
+                    # Remove $ and commas
+                    first_line = first_line.replace('$', '').replace(',', '').strip()
+                    total_usd = float(first_line)
                     logger.info(f"Scraped balance: ${total_usd:,.2f}")
                 else:
                     total_usd = 0
@@ -81,7 +84,8 @@ class WalletTracker:
                         if symbol_el and value_el:
                             symbol = await symbol_el.inner_text()
                             value_text = await value_el.inner_text()
-                            value_text = value_text.replace('$', '').replace(',', '').strip()
+                            # Take first line, remove $ and commas
+                            value_text = value_text.split('\n')[0].replace('$', '').replace(',', '').strip()
                             tokens.append({
                                 'symbol': symbol,
                                 'value': float(value_text) if value_text else 0
