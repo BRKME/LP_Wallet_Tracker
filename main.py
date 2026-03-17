@@ -12,7 +12,7 @@ import aiohttp
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from config import WALLETS, WHITELIST, WHITELIST_FLAT, get_current_plan, is_whitelisted, get_whitelist_category
+from config import WALLETS, WHITELIST, WHITELIST_FLAT, get_plan_for_wallet, get_total_plan, is_whitelisted, get_whitelist_category
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -262,8 +262,8 @@ class WalletTracker:
         msg = f"📊 <b>LP Portfolio Report</b>\n"
         msg += f"📅 {today}\n\n"
         
-        # Plan vs Fact
-        msg += f"<b>💰 Статус активов:</b>\n"
+        # Total Plan vs Fact
+        msg += f"<b>💰 ИТОГО:</b>\n"
         msg += f"├ План: {self.format_number(record['plan_usd'])}\n"
         msg += f"├ Факт: {self.format_number(record['total_usd'])}\n"
         
@@ -272,6 +272,22 @@ class WalletTracker:
         emoji = "✅" if diff >= 0 else "⚠️"
         sign = "+" if diff >= 0 else ""
         msg += f"└ {emoji} Разница: {sign}${diff:,.0f} ({sign}{diff_pct:.1f}%)\n\n"
+        
+        # Per-wallet breakdown with plan/fact
+        msg += f"<b>👛 По кошелькам:</b>\n"
+        for name, data in record['wallets'].items():
+            wallet_plan = data.get('plan_usd', 0)
+            wallet_fact = data['total_usd']
+            wallet_diff = wallet_fact - wallet_plan
+            wallet_emoji = "✅" if wallet_diff >= 0 else "⚠️"
+            wallet_sign = "+" if wallet_diff >= 0 else ""
+            
+            msg += f"\n<b>{name}:</b>\n"
+            msg += f"├ План: {self.format_number(wallet_plan)}\n"
+            msg += f"├ Факт: {self.format_number(wallet_fact)}\n"
+            msg += f"└ {wallet_emoji} {wallet_sign}${wallet_diff:,.0f}\n"
+        
+        msg += "\n"
         
         # Weekly change
         if last_week:
@@ -282,12 +298,6 @@ class WalletTracker:
         if self.is_first_week_of_month() and month_start:
             msg += f"<b>📆 Изменения за месяц:</b>\n"
             msg += f"└ {self.format_change(record['total_usd'], month_start['total_usd'])}\n\n"
-        
-        # Per-wallet breakdown
-        msg += f"<b>👛 По кошелькам:</b>\n"
-        for name, data in record['wallets'].items():
-            msg += f"├ {name}: {self.format_number(data['total_usd'])}\n"
-        msg += "\n"
         
         # Whitelist check
         not_whitelisted = whitelist_report.get('not_whitelisted', [])
@@ -341,8 +351,8 @@ class WalletTracker:
         
         # Get current month for plan
         current_month = datetime.now().strftime("%Y-%m")
-        plan_usd = get_current_plan(current_month)
-        logger.info(f"📋 Plan for {current_month}: ${plan_usd:,}")
+        total_plan_usd = get_total_plan(current_month)
+        logger.info(f"📋 Total plan for {current_month}: ${total_plan_usd:,}")
         
         # Fetch balances for all wallets
         total_usd = 0
@@ -353,16 +363,18 @@ class WalletTracker:
             logger.info(f"📊 Fetching {name} ({address[:8]}...)")
             data = await self.get_wallet_balance(address)
             
+            wallet_plan = get_plan_for_wallet(name, current_month)
             wallet_details[name] = {
                 "address": address,
-                "total_usd": data["total_usd"]
+                "total_usd": data["total_usd"],
+                "plan_usd": wallet_plan
             }
             total_usd += data["total_usd"]
             all_tokens.extend(data.get("tokens", []))
             
-            logger.info(f"   └ Balance: ${data['total_usd']:,.2f}")
+            logger.info(f"   └ Balance: ${data['total_usd']:,.2f} (Plan: ${wallet_plan:,})")
         
-        logger.info(f"💰 Total: ${total_usd:,.2f}")
+        logger.info(f"💰 Total: ${total_usd:,.2f} (Plan: ${total_plan_usd:,})")
         
         # Check whitelist
         whitelist_report = self.check_whitelist(all_tokens)
@@ -372,7 +384,7 @@ class WalletTracker:
         last_week = self.get_last_week_data(history)
         month_start = self.get_month_start_data(history)
         
-        record = self.add_record(history, total_usd, plan_usd, wallet_details)
+        record = self.add_record(history, total_usd, total_plan_usd, wallet_details)
         
         # Save monthly snapshot if first week
         if self.is_first_week_of_month():
