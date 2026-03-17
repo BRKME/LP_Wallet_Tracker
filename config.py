@@ -11,7 +11,7 @@ WALLETS = {
 # Whitelist of approved assets (symbols in lowercase for matching)
 WHITELIST = {
     "Layer 1": ["btc", "eth", "bnb", "wbtc", "weth"],
-    "Trading Infrastructure": ["hype", "aster", "pump"],  # Hyperliquid, Aster, Pump.fun
+    "Trading Infrastructure": ["hype", "aster", "pump", "zro"],  # Hyperliquid, Aster, Pump.fun, LayerZero
     "DeFi Credit": ["morpho"],
     "AI Narrative": ["tao"],
     "Privacy Hedge": ["zec"],  # Zcash
