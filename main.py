@@ -440,17 +440,6 @@ class WalletTracker:
             msg += f"<b>📆 Изменения за месяц:</b>\n"
             msg += f"└ {self.format_change(record['total_usd'], month_start['total_usd'])}\n\n"
         
-        # Whitelist check
-        not_whitelisted = whitelist_report.get('not_whitelisted', [])
-        if not_whitelisted:
-            msg += f"<b>⚠️ Активы вне белого списка:</b>\n"
-            for token in sorted(not_whitelisted, key=lambda x: x['value'], reverse=True)[:5]:
-                msg += f"├ {token['symbol']}: {self.format_number(token['value'])}\n"
-            if len(not_whitelisted) > 5:
-                msg += f"└ ... и ещё {len(not_whitelisted) - 5}\n"
-        else:
-            msg += "✅ Все активы в белом списке\n"
-        
         # Links
         msg += f"\n🔗 <a href='https://debank.com/profile/{WALLETS['Аркаша']}'>DeBank Аркаша</a>"
         msg += f" | <a href='https://debank.com/profile/{WALLETS['Марта']}'>DeBank Марта</a>"
