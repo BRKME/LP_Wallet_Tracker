@@ -1,0 +1,38 @@
+name: Weekly LP Portfolio Report
+
+on:
+  schedule:
+    - cron: '0 7 * * 0'  # Every Sunday at 10:00 MSK (07:00 UTC)
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Run tracker
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DEBANK_API_KEY: ${{ secrets.DEBANK_API_KEY }}
+        run: python main.py
+      
+      - name: Commit history
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add state/
+          git diff --staged --quiet || git commit -m "data: weekly snapshot $(date +%Y-%m-%d)"
+          git pull --rebase || true
+          git push || true
