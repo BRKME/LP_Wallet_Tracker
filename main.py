@@ -244,6 +244,67 @@ class WalletTracker:
             logger.warning(f"Zapper API failed: {e}")
             return None
     
+    async def get_btc_balance(self, btc_address: str) -> dict:
+        """Fetch BTC balance via mempool.space API (free, no auth)"""
+        try:
+            url = f"https://mempool.space/api/address/{btc_address}"
+            async with self.session.get(url, timeout=15) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # Balance in satoshis (funded - spent)
+                    funded = data.get("chain_stats", {}).get("funded_txo_sum", 0)
+                    spent = data.get("chain_stats", {}).get("spent_txo_sum", 0)
+                    # Include mempool (unconfirmed)
+                    mempool_funded = data.get("mempool_stats", {}).get("funded_txo_sum", 0)
+                    mempool_spent = data.get("mempool_stats", {}).get("spent_txo_sum", 0)
+                    
+                    balance_sat = (funded - spent) + (mempool_funded - mempool_spent)
+                    balance_btc = balance_sat / 1e8
+                    
+                    logger.info(f"BTC balance: {balance_btc:.8f} BTC")
+                else:
+                    logger.warning(f"mempool.space error: {resp.status}")
+                    return {"total_usd": 0, "btc": 0, "tokens": []}
+            
+            # Get BTC price
+            btc_price = await self._get_btc_price()
+            total_usd = balance_btc * btc_price
+            
+            logger.info(f"BTC value: ${total_usd:,.2f} ({balance_btc:.8f} BTC @ ${btc_price:,.0f})")
+            
+            return {
+                "total_usd": total_usd,
+                "btc": balance_btc,
+                "btc_price": btc_price,
+                "tokens": [{"symbol": "BTC", "value": total_usd}]
+            }
+        except Exception as e:
+            logger.error(f"BTC balance error: {e}")
+            return {"total_usd": 0, "btc": 0, "tokens": []}
+    
+    async def _get_btc_price(self) -> float:
+        """Get current BTC price in USD"""
+        try:
+            url = "https://mempool.space/api/v1/prices"
+            async with self.session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return float(data.get("USD", 0))
+        except:
+            pass
+        
+        # Fallback: CoinGecko
+        try:
+            url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+            async with self.session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return float(data.get("bitcoin", {}).get("usd", 0))
+        except:
+            pass
+        
+        return 0
+    
     async def get_wallet_balance(self, address: str) -> dict:
         """Get wallet balance, trying multiple sources"""
         # Try scraping DeBank directly (most accurate)
@@ -405,18 +466,25 @@ class WalletTracker:
         msg = f"📅 {today} · Неделя {week_num}\n\n"
         msg += f"<b>Накопления детей</b>\n\n"
         
-        # Total Plan vs Fact
-        msg += f"<b>ИТОГО:</b>\n"
-        msg += f"├ План: {self.format_number(record['plan_usd'])}\n"
-        msg += f"├ Факт: {self.format_number(record['total_usd'])}\n"
+        # Separate plan-tracked vs balance-only wallets
+        plan_wallets = {n: d for n, d in record['wallets'].items() if d.get('plan_usd', 0) > 0}
+        other_wallets = {n: d for n, d in record['wallets'].items() if d.get('plan_usd', 0) == 0}
         
-        diff = record['total_usd'] - record['plan_usd']
-        diff_pct = (diff / record['plan_usd'] * 100) if record['plan_usd'] > 0 else 0
+        # Total Plan vs Fact (only plan-tracked wallets)
+        plan_total_fact = sum(d['total_usd'] for d in plan_wallets.values())
+        plan_total_plan = sum(d.get('plan_usd', 0) for d in plan_wallets.values())
+        
+        msg += f"<b>ИТОГО (дети):</b>\n"
+        msg += f"├ План: {self.format_number(plan_total_plan)}\n"
+        msg += f"├ Факт: {self.format_number(plan_total_fact)}\n"
+        
+        diff = plan_total_fact - plan_total_plan
+        diff_pct = (diff / plan_total_plan * 100) if plan_total_plan > 0 else 0
         sign = "+" if diff >= 0 else ""
         msg += f"└ Разница: {sign}${diff:,.0f} ({sign}{diff_pct:.1f}%)\n"
         
-        # Per-wallet breakdown with plan/fact
-        for name, data in record['wallets'].items():
+        # Per-wallet breakdown — plan wallets first
+        for name, data in plan_wallets.items():
             wallet_plan = data.get('plan_usd', 0)
             wallet_fact = data['total_usd']
             wallet_diff = wallet_fact - wallet_plan
@@ -428,6 +496,12 @@ class WalletTracker:
             msg += f"├ Факт: {self.format_number(wallet_fact)}\n"
             msg += f"└ {wallet_sign}${wallet_diff:,.0f} ({wallet_sign}{wallet_pct:.1f}%)\n"
         
+        # Balance-only wallets (no plan)
+        for name, data in other_wallets.items():
+            wallet_fact = data['total_usd']
+            msg += f"\n<b>{name}:</b>\n"
+            msg += f"└ Баланс: {self.format_number(wallet_fact)}\n"
+        
         # Weekly change
         if last_week:
             msg += f"\n<b>За неделю:</b> {self.format_change(record['total_usd'], last_week['total_usd'])}\n"
@@ -437,9 +511,12 @@ class WalletTracker:
             msg += f"<b>За месяц:</b> {self.format_change(record['total_usd'], month_start['total_usd'])}\n"
         
         # Links
-        msg += f"\n<a href='https://debank.com/profile/{WALLETS['Аркаша']}'>Аркаша</a>"
-        msg += f" · <a href='https://debank.com/profile/{WALLETS['Марта']}'>Марта</a>"
-        msg += f" · <a href='https://brkme.github.io/LP_Wallet_Tracker/whitelist.html'>Белый список</a>"
+        msg += "\n"
+        for name, addr_or_dict in WALLETS.items():
+            evm_addr = addr_or_dict.get("evm") if isinstance(addr_or_dict, dict) else addr_or_dict
+            if evm_addr:
+                msg += f"<a href='https://debank.com/profile/{evm_addr}'>{name}</a> · "
+        msg += f"<a href='https://brkme.github.io/LP_Wallet_Tracker/whitelist.html'>Белый список</a>"
         
         return msg
     
@@ -486,20 +563,56 @@ class WalletTracker:
         wallet_details = {}
         all_tokens = []
         
-        for name, address in WALLETS.items():
-            logger.info(f"📊 Fetching {name} ({address[:8]}...)")
-            data = await self.get_wallet_balance(address)
+        for name, address_or_dict in WALLETS.items():
+            # Multi-chain wallet (dict with evm/btc keys)
+            if isinstance(address_or_dict, dict):
+                logger.info(f"📊 Fetching {name} (multi-chain)")
+                wallet_total = 0
+                wallet_tokens = []
+                
+                # EVM chains
+                evm_addr = address_or_dict.get("evm")
+                if evm_addr:
+                    logger.info(f"   ├ EVM: {evm_addr[:8]}...")
+                    evm_data = await self.get_wallet_balance(evm_addr)
+                    wallet_total += evm_data["total_usd"]
+                    wallet_tokens.extend(evm_data.get("tokens", []))
+                
+                # Bitcoin
+                btc_addr = address_or_dict.get("btc")
+                if btc_addr:
+                    logger.info(f"   ├ BTC: {btc_addr[:12]}...")
+                    btc_data = await self.get_btc_balance(btc_addr)
+                    wallet_total += btc_data["total_usd"]
+                    wallet_tokens.extend(btc_data.get("tokens", []))
+                
+                wallet_plan = get_plan_for_wallet(name, current_month)
+                wallet_details[name] = {
+                    "addresses": address_or_dict,
+                    "total_usd": wallet_total,
+                    "plan_usd": wallet_plan
+                }
+                total_usd += wallet_total
+                all_tokens.extend(wallet_tokens)
+                
+                logger.info(f"   └ Total: ${wallet_total:,.2f}" + (f" (Plan: ${wallet_plan:,})" if wallet_plan else ""))
             
-            wallet_plan = get_plan_for_wallet(name, current_month)
-            wallet_details[name] = {
-                "address": address,
-                "total_usd": data["total_usd"],
-                "plan_usd": wallet_plan
-            }
-            total_usd += data["total_usd"]
-            all_tokens.extend(data.get("tokens", []))
-            
-            logger.info(f"   └ Balance: ${data['total_usd']:,.2f} (Plan: ${wallet_plan:,})")
+            # Single EVM address (string)
+            else:
+                address = address_or_dict
+                logger.info(f"📊 Fetching {name} ({address[:8]}...)")
+                data = await self.get_wallet_balance(address)
+                
+                wallet_plan = get_plan_for_wallet(name, current_month)
+                wallet_details[name] = {
+                    "address": address,
+                    "total_usd": data["total_usd"],
+                    "plan_usd": wallet_plan
+                }
+                total_usd += data["total_usd"]
+                all_tokens.extend(data.get("tokens", []))
+                
+                logger.info(f"   └ Balance: ${data['total_usd']:,.2f}" + (f" (Plan: ${wallet_plan:,})" if wallet_plan else ""))
         
         logger.info(f"💰 Total: ${total_usd:,.2f} (Plan: ${total_plan_usd:,})")
         

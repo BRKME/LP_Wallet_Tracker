@@ -3,9 +3,15 @@ LP Wallet Tracker Configuration
 """
 
 # Wallet addresses
+# String = single EVM address
+# Dict = multi-chain wallet (evm + btc)
 WALLETS = {
     "Марта": "0x10082016a94920aBdf410CDB6f98c2Ead2c57340",
-    "Аркаша": "0x305220d077474c5cab839E7C1cB3264Aca19f1B9"
+    "Аркаша": "0x305220d077474c5cab839E7C1cB3264Aca19f1B9",
+    "Мама": {
+        "evm": "0xf45Eab0287b6465d8683dC0631936d6dFf5D429B",  # ETH + HyperEVM (same address)
+        "btc": "bc1qr90vs6m6dhc03m5x6jg0f6pnqdudxgq7gqs884",
+    }
 }
 
 # Whitelist of approved assets (symbols in lowercase for matching)
@@ -204,8 +210,15 @@ MARTA_PLAN = {
 
 
 def get_plan_for_wallet(wallet_name: str, year_month: str) -> int:
-    """Get plan for specific wallet and month"""
-    plan_data = ARKASHA_PLAN if wallet_name == "Аркаша" else MARTA_PLAN
+    """Get plan for specific wallet and month. Returns 0 if no plan exists."""
+    plans = {
+        "Аркаша": ARKASHA_PLAN,
+        "Марта": MARTA_PLAN,
+    }
+    
+    plan_data = plans.get(wallet_name)
+    if not plan_data:
+        return 0  # No plan for this wallet (e.g., Мама)
     
     if year_month in plan_data:
         return plan_data[year_month]
@@ -219,8 +232,12 @@ def get_plan_for_wallet(wallet_name: str, year_month: str) -> int:
 
 
 def get_total_plan(year_month: str) -> int:
-    """Get combined plan for both wallets"""
-    return get_plan_for_wallet("Аркаша", year_month) + get_plan_for_wallet("Марта", year_month)
+    """Get combined plan for wallets that have plans (excludes Мама etc.)"""
+    total = 0
+    for name in WALLETS:
+        plan = get_plan_for_wallet(name, year_month)
+        total += plan
+    return total
 
 
 def is_whitelisted(symbol: str) -> bool:
