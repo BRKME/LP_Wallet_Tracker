@@ -378,8 +378,12 @@ class WalletTracker:
         """Load historical data"""
         if HISTORY_FILE.exists():
             with open(HISTORY_FILE, 'r') as f:
-                return json.load(f)
-        return {"records": [], "monthly_snapshots": {}}
+                data = json.load(f)
+                # Ensure ATH structure exists
+                if "ath" not in data:
+                    data["ath"] = {"value": 0, "date": None}
+                return data
+        return {"records": [], "monthly_snapshots": {}, "ath": {"value": 0, "date": None}}
     
     def save_history(self, history: dict):
         """Save historical data"""
@@ -403,6 +407,15 @@ class WalletTracker:
         # Keep only last 52 weeks
         if len(history["records"]) > 52:
             history["records"] = history["records"][-52:]
+        
+        # Update ATH if new high
+        if "ath" not in history:
+            history["ath"] = {"value": 0, "date": None}
+        
+        if total_usd > history["ath"]["value"]:
+            history["ath"]["value"] = total_usd
+            history["ath"]["date"] = today
+            logger.info(f"🏆 New ATH: ${total_usd:,.0f}")
         
         return record
     
@@ -457,7 +470,7 @@ class WalletTracker:
         today = datetime.now()
         return today.day <= 7
     
-    def build_message(self, record: dict, last_week: dict, month_start: dict, whitelist_report: dict) -> str:
+    def build_message(self, record: dict, last_week: dict, month_start: dict, whitelist_report: dict, history: dict = None) -> str:
         """Build the Telegram message"""
         now = datetime.now()
         today = now.strftime("%d.%m.%Y")
@@ -502,13 +515,37 @@ class WalletTracker:
             msg += f"\n<b>{name}:</b>\n"
             msg += f"└ Баланс: {self.format_number(wallet_fact)}\n"
         
-        # Weekly change
-        if last_week:
-            msg += f"\n<b>За неделю:</b> {self.format_change(record['total_usd'], last_week['total_usd'])}\n"
+        # Dynamics section
+        msg += "\n📊 <b>Динамика:</b>\n"
         
-        # Monthly change (first week only)
-        if self.is_first_week_of_month() and month_start:
-            msg += f"<b>За месяц:</b> {self.format_change(record['total_usd'], month_start['total_usd'])}\n"
+        # Weekly change (always show)
+        if last_week:
+            msg += f"├ Неделя: {self.format_change(record['total_usd'], last_week['total_usd'])}\n"
+        else:
+            msg += f"├ Неделя: —\n"
+        
+        # Monthly change (always show)
+        if month_start:
+            msg += f"├ Месяц: {self.format_change(record['total_usd'], month_start['total_usd'])}\n"
+        else:
+            msg += f"├ Месяц: —\n"
+        
+        # ATH
+        if history and history.get("ath", {}).get("value", 0) > 0:
+            ath_value = history["ath"]["value"]
+            ath_date = history["ath"].get("date", "—")
+            if ath_date and ath_date != "—":
+                ath_date_fmt = datetime.strptime(ath_date, "%Y-%m-%d").strftime("%d.%m.%Y")
+            else:
+                ath_date_fmt = "—"
+            
+            # Check if current is ATH
+            if record['total_usd'] >= ath_value:
+                msg += f"└ 🏆 ATH: {self.format_number(ath_value)} (сегодня!)\n"
+            else:
+                # Distance from ATH
+                from_ath_pct = ((record['total_usd'] - ath_value) / ath_value * 100)
+                msg += f"└ ATH: {self.format_number(ath_value)} ({ath_date_fmt}) · {from_ath_pct:.1f}%\n"
         
         # Links
         msg += "\n"
@@ -638,7 +675,7 @@ class WalletTracker:
         self.save_history(history)
         
         # Build and send message
-        message = self.build_message(record, last_week, month_start, whitelist_report)
+        message = self.build_message(record, last_week, month_start, whitelist_report, history)
         await self.send_telegram(message)
         
         logger.info("✅ Done!")
