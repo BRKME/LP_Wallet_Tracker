@@ -535,7 +535,7 @@ class WalletTracker:
         today = datetime.now()
         return today.day <= 7
     
-    def build_message(self, record: dict, last_week: dict, month_start: dict, whitelist_report: dict, history: dict = None) -> str:
+    def build_message(self, record: dict, last_week: dict, month_start: dict, whitelist_report: dict, history: dict = None, all_tokens: list = None) -> str:
         """Build the Telegram message"""
         now = datetime.now()
         today = now.strftime("%d.%m.%Y")
@@ -627,6 +627,35 @@ class WalletTracker:
             else:
                 msg = msg.rstrip("\n")
                 msg = msg.rsplit("├", 1)[0] + "└" + msg.rsplit("├", 1)[1] + "\n"
+        
+        # Asset allocation
+        if all_tokens:
+            # Group by symbol
+            by_symbol = {}
+            for t in all_tokens:
+                sym = t.get("symbol", "???").upper()
+                val = t.get("value", 0)
+                if val > 0:
+                    by_symbol[sym] = by_symbol.get(sym, 0) + val
+            
+            total_val = sum(by_symbol.values())
+            if total_val > 0 and len(by_symbol) > 0:
+                # Sort by value descending
+                sorted_assets = sorted(by_symbol.items(), key=lambda x: -x[1])
+                
+                msg += "\n💼 <b>Активы:</b>\n"
+                parts = []
+                for sym, val in sorted_assets[:8]:  # Top 8
+                    pct = val / total_val * 100
+                    if pct >= 1:  # Show only >= 1%
+                        parts.append(f"{sym} {pct:.0f}%")
+                
+                # Show in 2 rows if many
+                if len(parts) > 4:
+                    msg += " · ".join(parts[:4]) + "\n"
+                    msg += " · ".join(parts[4:]) + "\n"
+                else:
+                    msg += " · ".join(parts) + "\n"
         
         # Links
         msg += "\n"
@@ -764,7 +793,7 @@ class WalletTracker:
         self.save_history(history)
         
         # Build and send message
-        message = self.build_message(record, last_week, month_start, whitelist_report, history)
+        message = self.build_message(record, last_week, month_start, whitelist_report, history, all_tokens)
         await self.send_telegram(message)
         
         logger.info("✅ Done!")
