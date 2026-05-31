@@ -305,6 +305,54 @@ class WalletTracker:
         
         return 0
     
+    async def get_zec_balance(self, zec_address: str) -> dict:
+        """Fetch ZEC balance via blockchair API"""
+        try:
+            # Use blockchair.com API (free tier: 1440 requests/day)
+            url = f"https://api.blockchair.com/zcash/dashboards/address/{zec_address}"
+            async with self.session.get(url, timeout=15) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    addr_data = data.get("data", {}).get(zec_address, {})
+                    address_info = addr_data.get("address", {})
+                    
+                    # Balance in zatoshis (1 ZEC = 1e8 zatoshis)
+                    balance_zatoshi = address_info.get("balance", 0)
+                    balance_zec = balance_zatoshi / 1e8
+                    
+                    logger.info(f"ZEC balance: {balance_zec:.8f} ZEC")
+                else:
+                    logger.warning(f"blockchair ZEC error: {resp.status}")
+                    return {"total_usd": 0, "zec": 0, "tokens": []}
+            
+            # Get ZEC price
+            zec_price = await self._get_zec_price()
+            total_usd = balance_zec * zec_price
+            
+            logger.info(f"ZEC value: ${total_usd:,.2f} ({balance_zec:.8f} ZEC @ ${zec_price:,.2f})")
+            
+            return {
+                "total_usd": total_usd,
+                "zec": balance_zec,
+                "zec_price": zec_price,
+                "tokens": [{"symbol": "ZEC", "value": total_usd}]
+            }
+        except Exception as e:
+            logger.error(f"ZEC balance error: {e}")
+            return {"total_usd": 0, "zec": 0, "tokens": []}
+    
+    async def _get_zec_price(self) -> float:
+        """Get current ZEC price in USD"""
+        try:
+            url = "https://api.coingecko.com/api/v3/simple/price?ids=zcash&vs_currencies=usd"
+            async with self.session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return float(data.get("zcash", {}).get("usd", 0))
+        except:
+            pass
+        return 0
+    
     async def get_wallet_balance(self, address: str) -> dict:
         """Get wallet balance, trying multiple sources"""
         # Try scraping DeBank directly (most accurate)
@@ -379,11 +427,13 @@ class WalletTracker:
         if HISTORY_FILE.exists():
             with open(HISTORY_FILE, 'r') as f:
                 data = json.load(f)
-                # Ensure ATH structure exists
+                # Ensure ATH structures exist
                 if "ath" not in data:
                     data["ath"] = {"value": 0, "date": None}
+                if "wallet_ath" not in data:
+                    data["wallet_ath"] = {}
                 return data
-        return {"records": [], "monthly_snapshots": {}, "ath": {"value": 0, "date": None}}
+        return {"records": [], "monthly_snapshots": {}, "ath": {"value": 0, "date": None}, "wallet_ath": {}}
     
     def save_history(self, history: dict):
         """Save historical data"""
@@ -408,14 +458,29 @@ class WalletTracker:
         if len(history["records"]) > 52:
             history["records"] = history["records"][-52:]
         
-        # Update ATH if new high
+        # Update total ATH if new high
         if "ath" not in history:
             history["ath"] = {"value": 0, "date": None}
         
         if total_usd > history["ath"]["value"]:
             history["ath"]["value"] = total_usd
             history["ath"]["date"] = today
-            logger.info(f"🏆 New ATH: ${total_usd:,.0f}")
+            logger.info(f"🏆 New ATH (total): ${total_usd:,.0f}")
+        
+        # Update per-wallet ATH
+        if "wallet_ath" not in history:
+            history["wallet_ath"] = {}
+        
+        for wallet_name, wallet_data in details.items():
+            wallet_value = wallet_data.get("total_usd", 0)
+            
+            if wallet_name not in history["wallet_ath"]:
+                history["wallet_ath"][wallet_name] = {"value": 0, "date": None}
+            
+            if wallet_value > history["wallet_ath"][wallet_name]["value"]:
+                history["wallet_ath"][wallet_name]["value"] = wallet_value
+                history["wallet_ath"][wallet_name]["date"] = today
+                logger.info(f"🏆 New ATH ({wallet_name}): ${wallet_value:,.0f}")
         
         return record
     
@@ -496,6 +561,38 @@ class WalletTracker:
         sign = "+" if diff >= 0 else ""
         msg += f"└ Разница: {sign}${diff:,.0f} ({sign}{diff_pct:.1f}%)\n"
         
+        # Get wallet ATH data
+        wallet_ath = history.get("wallet_ath", {}) if history else {}
+        
+        # Helper to get wallet dynamics
+        def get_wallet_dynamics(wallet_name, current_value):
+            parts = []
+            
+            # Weekly
+            if last_week and wallet_name in last_week.get('wallets', {}):
+                prev_val = last_week['wallets'][wallet_name].get('total_usd', 0)
+                if prev_val > 0:
+                    parts.append(f"нед: {self.format_change(current_value, prev_val)}")
+            
+            # Monthly
+            if month_start and wallet_name in month_start.get('wallets', {}):
+                prev_val = month_start['wallets'][wallet_name].get('total_usd', 0)
+                if prev_val > 0:
+                    parts.append(f"мес: {self.format_change(current_value, prev_val)}")
+            
+            # ATH
+            if wallet_name in wallet_ath:
+                ath_val = wallet_ath[wallet_name].get("value", 0)
+                ath_date = wallet_ath[wallet_name].get("date", "")
+                if ath_val > 0:
+                    if current_value >= ath_val:
+                        parts.append("🏆 ATH!")
+                    else:
+                        from_ath_pct = ((current_value - ath_val) / ath_val * 100)
+                        parts.append(f"ATH: {from_ath_pct:.0f}%")
+            
+            return " · ".join(parts) if parts else ""
+        
         # Per-wallet breakdown — plan wallets first
         for name, data in plan_wallets.items():
             wallet_plan = data.get('plan_usd', 0)
@@ -507,45 +604,29 @@ class WalletTracker:
             msg += f"\n<b>{name}:</b>\n"
             msg += f"├ План: {self.format_number(wallet_plan)}\n"
             msg += f"├ Факт: {self.format_number(wallet_fact)}\n"
-            msg += f"└ {wallet_sign}${wallet_diff:,.0f} ({wallet_sign}{wallet_pct:.1f}%)\n"
+            msg += f"├ {wallet_sign}${wallet_diff:,.0f} ({wallet_sign}{wallet_pct:.1f}%)\n"
+            
+            # Wallet dynamics
+            dynamics = get_wallet_dynamics(name, wallet_fact)
+            if dynamics:
+                msg += f"└ {dynamics}\n"
+            else:
+                msg = msg[:-1]  # Remove last ├ and replace with └
+                msg = msg.rsplit("├", 1)[0] + "└" + msg.rsplit("├", 1)[1]
         
         # Balance-only wallets (no plan)
         for name, data in other_wallets.items():
             wallet_fact = data['total_usd']
             msg += f"\n<b>{name}:</b>\n"
-            msg += f"└ Баланс: {self.format_number(wallet_fact)}\n"
-        
-        # Dynamics section
-        msg += "\n📊 <b>Динамика:</b>\n"
-        
-        # Weekly change (always show)
-        if last_week:
-            msg += f"├ Неделя: {self.format_change(record['total_usd'], last_week['total_usd'])}\n"
-        else:
-            msg += f"├ Неделя: —\n"
-        
-        # Monthly change (always show)
-        if month_start:
-            msg += f"├ Месяц: {self.format_change(record['total_usd'], month_start['total_usd'])}\n"
-        else:
-            msg += f"├ Месяц: —\n"
-        
-        # ATH
-        if history and history.get("ath", {}).get("value", 0) > 0:
-            ath_value = history["ath"]["value"]
-            ath_date = history["ath"].get("date", "—")
-            if ath_date and ath_date != "—":
-                ath_date_fmt = datetime.strptime(ath_date, "%Y-%m-%d").strftime("%d.%m.%Y")
-            else:
-                ath_date_fmt = "—"
+            msg += f"├ Баланс: {self.format_number(wallet_fact)}\n"
             
-            # Check if current is ATH
-            if record['total_usd'] >= ath_value:
-                msg += f"└ 🏆 ATH: {self.format_number(ath_value)} (сегодня!)\n"
+            # Wallet dynamics
+            dynamics = get_wallet_dynamics(name, wallet_fact)
+            if dynamics:
+                msg += f"└ {dynamics}\n"
             else:
-                # Distance from ATH
-                from_ath_pct = ((record['total_usd'] - ath_value) / ath_value * 100)
-                msg += f"└ ATH: {self.format_number(ath_value)} ({ath_date_fmt}) · {from_ath_pct:.1f}%\n"
+                msg = msg.rstrip("\n")
+                msg = msg.rsplit("├", 1)[0] + "└" + msg.rsplit("├", 1)[1] + "\n"
         
         # Links
         msg += "\n"
@@ -627,6 +708,14 @@ class WalletTracker:
                     btc_data = await self.get_btc_balance(btc_addr)
                     wallet_total += btc_data["total_usd"]
                     wallet_tokens.extend(btc_data.get("tokens", []))
+                
+                # Zcash
+                zec_addr = address_or_dict.get("zec")
+                if zec_addr:
+                    logger.info(f"   ├ ZEC: {zec_addr[:12]}...")
+                    zec_data = await self.get_zec_balance(zec_addr)
+                    wallet_total += zec_data["total_usd"]
+                    wallet_tokens.extend(zec_data.get("tokens", []))
                 
                 wallet_plan = get_plan_for_wallet(name, current_month)
                 wallet_details[name] = {

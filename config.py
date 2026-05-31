@@ -11,6 +11,7 @@ WALLETS = {
     "Мама": {
         "evm": "0xf45Eab0287b6465d8683dC0631936d6dFf5D429B",  # ETH + HyperEVM (same address)
         "btc": "bc1qr90vs6m6dhc03m5x6jg0f6pnqdudxgq7gqs884",
+        "zec": "t1VY9XnBT6hL2wKZ9KF3r8gtHneFTVKnDAe",
     }
 }
 
