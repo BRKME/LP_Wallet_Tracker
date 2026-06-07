@@ -541,28 +541,29 @@ class WalletTracker:
         today = now.strftime("%d.%m.%Y")
         week_num = now.isocalendar()[1]
         
+        # Wallet purposes
+        WALLET_PURPOSES = {
+            "Марта": "копим на квартиру",
+            "Аркаша": "копим на учебу",
+            "Мама": "копим на домик у моря",
+        }
+        
         msg = f"📅 {today} · Неделя {week_num}\n\n"
-        msg += f"<b>Накопления детей</b>\n\n"
+        msg += f"<b>Накопления детей</b>\n"
         
         # Separate plan-tracked vs balance-only wallets
         plan_wallets = {n: d for n, d in record['wallets'].items() if d.get('plan_usd', 0) > 0}
         other_wallets = {n: d for n, d in record['wallets'].items() if d.get('plan_usd', 0) == 0}
         
-        # Total Plan vs Fact (only plan-tracked wallets)
-        plan_total_fact = sum(d['total_usd'] for d in plan_wallets.values())
-        plan_total_plan = sum(d.get('plan_usd', 0) for d in plan_wallets.values())
-        
-        msg += f"<b>ИТОГО (дети):</b>\n"
-        msg += f"├ План: {self.format_number(plan_total_plan)}\n"
-        msg += f"├ Факт: {self.format_number(plan_total_fact)}\n"
-        
-        diff = plan_total_fact - plan_total_plan
-        diff_pct = (diff / plan_total_plan * 100) if plan_total_plan > 0 else 0
-        sign = "+" if diff >= 0 else ""
-        msg += f"└ Разница: {sign}${diff:,.0f} ({sign}{diff_pct:.1f}%)\n"
-        
         # Get wallet ATH data
         wallet_ath = history.get("wallet_ath", {}) if history else {}
+        
+        # Helper to format wallet name with purpose
+        def wallet_label(name):
+            purpose = WALLET_PURPOSES.get(name)
+            if purpose:
+                return f"{name} <i>({purpose})</i>"
+            return name
         
         # Helper to get wallet dynamics
         def get_wallet_dynamics(wallet_name, current_value):
@@ -601,7 +602,7 @@ class WalletTracker:
             wallet_pct = (wallet_diff / wallet_plan * 100) if wallet_plan > 0 else 0
             wallet_sign = "+" if wallet_diff >= 0 else ""
             
-            msg += f"\n<b>{name}:</b>\n"
+            msg += f"\n<b>{wallet_label(name)}:</b>\n"
             msg += f"├ План: {self.format_number(wallet_plan)}\n"
             msg += f"├ Факт: {self.format_number(wallet_fact)}\n"
             msg += f"├ {wallet_sign}${wallet_diff:,.0f} ({wallet_sign}{wallet_pct:.1f}%)\n"
@@ -617,7 +618,7 @@ class WalletTracker:
         # Balance-only wallets (no plan)
         for name, data in other_wallets.items():
             wallet_fact = data['total_usd']
-            msg += f"\n<b>{name}:</b>\n"
+            msg += f"\n<b>{wallet_label(name)}:</b>\n"
             msg += f"├ Баланс: {self.format_number(wallet_fact)}\n"
             
             # Wallet dynamics
