@@ -306,40 +306,65 @@ class WalletTracker:
         return 0
     
     async def get_zec_balance(self, zec_address: str) -> dict:
-        """Fetch ZEC balance via blockchair API"""
+        """Fetch ZEC balance with multiple API fallbacks"""
+        balance_zec = None
+        
+        # Try 1: blockchair.com
         try:
-            # Use blockchair.com API (free tier: 1440 requests/day)
             url = f"https://api.blockchair.com/zcash/dashboards/address/{zec_address}"
             async with self.session.get(url, timeout=15) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     addr_data = data.get("data", {}).get(zec_address, {})
                     address_info = addr_data.get("address", {})
-                    
-                    # Balance in zatoshis (1 ZEC = 1e8 zatoshis)
                     balance_zatoshi = address_info.get("balance", 0)
                     balance_zec = balance_zatoshi / 1e8
-                    
-                    logger.info(f"ZEC balance: {balance_zec:.8f} ZEC")
+                    logger.info(f"ZEC balance (blockchair): {balance_zec:.8f} ZEC")
                 else:
                     logger.warning(f"blockchair ZEC error: {resp.status}")
-                    return {"total_usd": 0, "zec": 0, "tokens": []}
-            
-            # Get ZEC price
-            zec_price = await self._get_zec_price()
-            total_usd = balance_zec * zec_price
-            
-            logger.info(f"ZEC value: ${total_usd:,.2f} ({balance_zec:.8f} ZEC @ ${zec_price:,.2f})")
-            
-            return {
-                "total_usd": total_usd,
-                "zec": balance_zec,
-                "zec_price": zec_price,
-                "tokens": [{"symbol": "ZEC", "value": total_usd}]
-            }
         except Exception as e:
-            logger.error(f"ZEC balance error: {e}")
+            logger.warning(f"blockchair ZEC exception: {e}")
+        
+        # Try 2: mainnet.zcashexplorer.app
+        if balance_zec is None:
+            try:
+                url = f"https://mainnet.zcashexplorer.app/api/v1/address/{zec_address}/info"
+                async with self.session.get(url, timeout=15) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        balance_zec = float(data.get("balance", 0))
+                        logger.info(f"ZEC balance (zcashexplorer): {balance_zec:.8f} ZEC")
+            except Exception as e:
+                logger.warning(f"zcashexplorer exception: {e}")
+        
+        # Try 3: zec.rocks API
+        if balance_zec is None:
+            try:
+                url = f"https://api.zec.rocks/v1/address/{zec_address}"
+                async with self.session.get(url, timeout=15) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        balance_zec = float(data.get("balance", 0)) / 1e8
+                        logger.info(f"ZEC balance (zec.rocks): {balance_zec:.8f} ZEC")
+            except Exception as e:
+                logger.warning(f"zec.rocks exception: {e}")
+        
+        if balance_zec is None or balance_zec == 0:
+            logger.warning(f"ZEC balance is 0 or unavailable for {zec_address}")
             return {"total_usd": 0, "zec": 0, "tokens": []}
+        
+        # Get ZEC price
+        zec_price = await self._get_zec_price()
+        total_usd = balance_zec * zec_price
+        
+        logger.info(f"ZEC value: ${total_usd:,.2f} ({balance_zec:.8f} ZEC @ ${zec_price:,.2f})")
+        
+        return {
+            "total_usd": total_usd,
+            "zec": balance_zec,
+            "zec_price": zec_price,
+            "tokens": [{"symbol": "ZEC", "value": total_usd}]
+        }
     
     async def _get_zec_price(self) -> float:
         """Get current ZEC price in USD"""
