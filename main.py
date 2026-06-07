@@ -619,6 +619,27 @@ class WalletTracker:
             
             return " · ".join(parts) if parts else ""
         
+        # Helper to format asset split for a wallet
+        def format_assets(tokens):
+            if not tokens:
+                return ""
+            by_symbol = {}
+            for t in tokens:
+                sym = (t.get("symbol", "???") or "???").upper()
+                val = t.get("value", 0) or 0
+                if val > 0:
+                    by_symbol[sym] = by_symbol.get(sym, 0) + val
+            total_val = sum(by_symbol.values())
+            if total_val <= 0:
+                return ""
+            sorted_assets = sorted(by_symbol.items(), key=lambda x: -x[1])
+            parts = []
+            for sym, val in sorted_assets[:6]:
+                pct = val / total_val * 100
+                if pct >= 1:
+                    parts.append(f"{sym} {pct:.0f}%")
+            return " · ".join(parts)
+        
         # Per-wallet breakdown — plan wallets first
         for name, data in plan_wallets.items():
             wallet_plan = data.get('plan_usd', 0)
@@ -632,12 +653,17 @@ class WalletTracker:
             msg += f"├ Факт: {self.format_number(wallet_fact)}\n"
             msg += f"├ {wallet_sign}${wallet_diff:,.0f} ({wallet_sign}{wallet_pct:.1f}%)\n"
             
-            # Wallet dynamics
+            # Dynamics
             dynamics = get_wallet_dynamics(name, wallet_fact)
             if dynamics:
-                msg += f"└ {dynamics}\n"
+                msg += f"├ {dynamics}\n"
+            
+            # Asset split
+            assets = format_assets(data.get('tokens', []))
+            if assets:
+                msg += f"└ 💼 {assets}\n"
             else:
-                msg = msg[:-1]  # Remove last ├ and replace with └
+                # Replace last ├ with └
                 msg = msg.rsplit("├", 1)[0] + "└" + msg.rsplit("├", 1)[1]
         
         # Balance-only wallets (no plan)
@@ -646,42 +672,18 @@ class WalletTracker:
             msg += f"\n<b>{wallet_label(name)}:</b>\n"
             msg += f"├ Баланс: {self.format_number(wallet_fact)}\n"
             
-            # Wallet dynamics
+            # Dynamics
             dynamics = get_wallet_dynamics(name, wallet_fact)
             if dynamics:
-                msg += f"└ {dynamics}\n"
-            else:
-                msg = msg.rstrip("\n")
-                msg = msg.rsplit("├", 1)[0] + "└" + msg.rsplit("├", 1)[1] + "\n"
-        
-        # Asset allocation
-        if all_tokens:
-            # Group by symbol
-            by_symbol = {}
-            for t in all_tokens:
-                sym = t.get("symbol", "???").upper()
-                val = t.get("value", 0)
-                if val > 0:
-                    by_symbol[sym] = by_symbol.get(sym, 0) + val
+                msg += f"├ {dynamics}\n"
             
-            total_val = sum(by_symbol.values())
-            if total_val > 0 and len(by_symbol) > 0:
-                # Sort by value descending
-                sorted_assets = sorted(by_symbol.items(), key=lambda x: -x[1])
-                
-                msg += "\n💼 <b>Активы:</b>\n"
-                parts = []
-                for sym, val in sorted_assets[:8]:  # Top 8
-                    pct = val / total_val * 100
-                    if pct >= 1:  # Show only >= 1%
-                        parts.append(f"{sym} {pct:.0f}%")
-                
-                # Show in 2 rows if many
-                if len(parts) > 4:
-                    msg += " · ".join(parts[:4]) + "\n"
-                    msg += " · ".join(parts[4:]) + "\n"
-                else:
-                    msg += " · ".join(parts) + "\n"
+            # Asset split
+            assets = format_assets(data.get('tokens', []))
+            if assets:
+                msg += f"└ 💼 {assets}\n"
+            else:
+                # Replace last ├ with └
+                msg = msg.rsplit("├", 1)[0] + "└" + msg.rsplit("├", 1)[1]
         
         # Links
         msg += "\n"
@@ -776,7 +778,8 @@ class WalletTracker:
                 wallet_details[name] = {
                     "addresses": address_or_dict,
                     "total_usd": wallet_total,
-                    "plan_usd": wallet_plan
+                    "plan_usd": wallet_plan,
+                    "tokens": wallet_tokens
                 }
                 total_usd += wallet_total
                 all_tokens.extend(wallet_tokens)
@@ -793,7 +796,8 @@ class WalletTracker:
                 wallet_details[name] = {
                     "address": address,
                     "total_usd": data["total_usd"],
-                    "plan_usd": wallet_plan
+                    "plan_usd": wallet_plan,
+                    "tokens": data.get("tokens", [])
                 }
                 total_usd += data["total_usd"]
                 all_tokens.extend(data.get("tokens", []))
