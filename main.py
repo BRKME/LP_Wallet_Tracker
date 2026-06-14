@@ -288,42 +288,70 @@ class WalletTracker:
             return None
     
     async def get_btc_balance(self, btc_address: str) -> dict:
-        """Fetch BTC balance via mempool.space API (free, no auth)"""
+        """Fetch BTC balance with multiple API fallbacks"""
+        balance_btc = None
+        
+        # Try 1: mempool.space
         try:
             url = f"https://mempool.space/api/address/{btc_address}"
             async with self.session.get(url, timeout=15) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    # Balance in satoshis (funded - spent)
                     funded = data.get("chain_stats", {}).get("funded_txo_sum", 0)
                     spent = data.get("chain_stats", {}).get("spent_txo_sum", 0)
-                    # Include mempool (unconfirmed)
                     mempool_funded = data.get("mempool_stats", {}).get("funded_txo_sum", 0)
                     mempool_spent = data.get("mempool_stats", {}).get("spent_txo_sum", 0)
-                    
                     balance_sat = (funded - spent) + (mempool_funded - mempool_spent)
                     balance_btc = balance_sat / 1e8
-                    
-                    logger.info(f"BTC balance: {balance_btc:.8f} BTC")
+                    logger.info(f"BTC balance (mempool): {balance_btc:.8f} BTC")
                 else:
                     logger.warning(f"mempool.space error: {resp.status}")
-                    return {"total_usd": 0, "btc": 0, "tokens": []}
-            
-            # Get BTC price
-            btc_price = await self._get_btc_price()
-            total_usd = balance_btc * btc_price
-            
-            logger.info(f"BTC value: ${total_usd:,.2f} ({balance_btc:.8f} BTC @ ${btc_price:,.0f})")
-            
-            return {
-                "total_usd": total_usd,
-                "btc": balance_btc,
-                "btc_price": btc_price,
-                "tokens": [{"symbol": "BTC", "value": total_usd}]
-            }
         except Exception as e:
-            logger.error(f"BTC balance error: {e}")
+            logger.warning(f"mempool.space exception: {e}")
+        
+        # Try 2: blockstream.info
+        if balance_btc is None:
+            try:
+                url = f"https://blockstream.info/api/address/{btc_address}"
+                async with self.session.get(url, timeout=15) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        funded = data.get("chain_stats", {}).get("funded_txo_sum", 0)
+                        spent = data.get("chain_stats", {}).get("spent_txo_sum", 0)
+                        balance_sat = funded - spent
+                        balance_btc = balance_sat / 1e8
+                        logger.info(f"BTC balance (blockstream): {balance_btc:.8f} BTC")
+            except Exception as e:
+                logger.warning(f"blockstream exception: {e}")
+        
+        # Try 3: blockchain.info
+        if balance_btc is None:
+            try:
+                url = f"https://blockchain.info/q/addressbalance/{btc_address}"
+                async with self.session.get(url, timeout=15) as resp:
+                    if resp.status == 200:
+                        text = await resp.text()
+                        balance_btc = int(text.strip()) / 1e8
+                        logger.info(f"BTC balance (blockchain.info): {balance_btc:.8f} BTC")
+            except Exception as e:
+                logger.warning(f"blockchain.info exception: {e}")
+        
+        if balance_btc is None:
+            logger.error(f"All BTC APIs failed for {btc_address}")
             return {"total_usd": 0, "btc": 0, "tokens": []}
+        
+        # Get BTC price
+        btc_price = await self._get_btc_price()
+        total_usd = balance_btc * btc_price
+        
+        logger.info(f"BTC value: ${total_usd:,.2f} ({balance_btc:.8f} BTC @ ${btc_price:,.0f})")
+        
+        return {
+            "total_usd": total_usd,
+            "btc": balance_btc,
+            "btc_price": btc_price,
+            "tokens": [{"symbol": "BTC", "value": total_usd}]
+        }
     
     async def _get_btc_price(self) -> float:
         """Get current BTC price in USD"""
