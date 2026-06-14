@@ -737,11 +737,11 @@ class WalletTracker:
             if prev_ath > 0:
                 if current_value > prev_ath:
                     # Genuinely a new high this week
-                    parts.append("🏆 ATH!")
+                    parts.append(f"🏆 ATH! (${current_value:,.0f})")
                 else:
-                    # Below previous ATH — show how far
+                    # Below previous ATH — show how far + the ATH value
                     from_ath_pct = ((current_value - prev_ath) / prev_ath * 100)
-                    parts.append(f"от ATH: {from_ath_pct:.0f}%")
+                    parts.append(f"от ATH ${prev_ath:,.0f}: {from_ath_pct:.0f}%")
             # If prev_ath == 0, this is the first record ever — show nothing
             
             return " · ".join(parts) if parts else ""
