@@ -39,7 +39,10 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          # Pull latest first (only state/, code already checked out)
+          git stash push -- state/ 2>/dev/null || true
+          git pull --rebase origin main || true
+          git stash pop 2>/dev/null || true
           git add state/
           git diff --staged --quiet || git commit -m "data: weekly snapshot $(date +%Y-%m-%d)"
-          git pull --rebase || true
-          git push || true
+          git push origin main || true

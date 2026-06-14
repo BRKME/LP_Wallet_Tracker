@@ -1,4 +1,25 @@
 {
-  "records": [],
-  "monthly_snapshots": {}
+  "records": [
+    {
+      "date": "2026-05-31",
+      "total_usd": 16024,
+      "plan_usd": 23909,
+      "difference": -7885,
+      "wallets": {
+        "Марта": {"total_usd": 5046, "plan_usd": 8838},
+        "Аркаша": {"total_usd": 8659, "plan_usd": 15071},
+        "Мама": {"total_usd": 2319, "plan_usd": 0}
+      }
+    }
+  ],
+  "monthly_snapshots": {},
+  "ath": {
+    "value": 16024,
+    "date": "2026-05-31"
+  },
+  "wallet_ath": {
+    "Марта": {"value": 5046, "date": "2026-05-31"},
+    "Аркаша": {"value": 8659, "date": "2026-05-31"},
+    "Мама": {"value": 3021, "date": "2026-06-14"}
+  }
 }

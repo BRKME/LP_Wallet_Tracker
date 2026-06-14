@@ -583,7 +583,7 @@ class WalletTracker:
             json.dump(history, f, indent=2, ensure_ascii=False)
     
     def add_record(self, history: dict, total_usd: float, plan_usd: float, details: dict):
-        """Add a new record to history"""
+        """Add a new record to history. Returns (record, ath_info)."""
         today = datetime.now().strftime("%Y-%m-%d")
         
         record = {
@@ -600,31 +600,37 @@ class WalletTracker:
         if len(history["records"]) > 52:
             history["records"] = history["records"][-52:]
         
-        # Update total ATH if new high
         if "ath" not in history:
             history["ath"] = {"value": 0, "date": None}
+        if "wallet_ath" not in history:
+            history["wallet_ath"] = {}
         
+        # Snapshot PREVIOUS ATH values before updating (for display comparison)
+        ath_info = {
+            "total_prev_ath": history["ath"]["value"],
+            "wallet_prev_ath": {}
+        }
+        for wallet_name, wallet_data in details.items():
+            prev = history["wallet_ath"].get(wallet_name, {}).get("value", 0)
+            ath_info["wallet_prev_ath"][wallet_name] = prev
+        
+        # Update total ATH if new high
         if total_usd > history["ath"]["value"]:
             history["ath"]["value"] = total_usd
             history["ath"]["date"] = today
             logger.info(f"🏆 New ATH (total): ${total_usd:,.0f}")
         
         # Update per-wallet ATH
-        if "wallet_ath" not in history:
-            history["wallet_ath"] = {}
-        
         for wallet_name, wallet_data in details.items():
             wallet_value = wallet_data.get("total_usd", 0)
-            
             if wallet_name not in history["wallet_ath"]:
                 history["wallet_ath"][wallet_name] = {"value": 0, "date": None}
-            
             if wallet_value > history["wallet_ath"][wallet_name]["value"]:
                 history["wallet_ath"][wallet_name]["value"] = wallet_value
                 history["wallet_ath"][wallet_name]["date"] = today
                 logger.info(f"🏆 New ATH ({wallet_name}): ${wallet_value:,.0f}")
         
-        return record
+        return record, ath_info
     
     def get_last_week_data(self, history: dict) -> dict:
         """Get data from last week"""
@@ -677,7 +683,7 @@ class WalletTracker:
         today = datetime.now()
         return today.day <= 7
     
-    def build_message(self, record: dict, last_week: dict, month_start: dict, whitelist_report: dict, history: dict = None, all_tokens: list = None) -> str:
+    def build_message(self, record: dict, last_week: dict, month_start: dict, whitelist_report: dict, history: dict = None, all_tokens: list = None, ath_info: dict = None) -> str:
         """Build the Telegram message"""
         now = datetime.now()
         today = now.strftime("%d.%m.%Y")
@@ -723,16 +729,20 @@ class WalletTracker:
                 if prev_val > 0:
                     parts.append(f"мес: {self.format_change(current_value, prev_val)}")
             
-            # ATH
-            if wallet_name in wallet_ath:
-                ath_val = wallet_ath[wallet_name].get("value", 0)
-                ath_date = wallet_ath[wallet_name].get("date", "")
-                if ath_val > 0:
-                    if current_value >= ath_val:
-                        parts.append("🏆 ATH!")
-                    else:
-                        from_ath_pct = ((current_value - ath_val) / ath_val * 100)
-                        parts.append(f"ATH: {from_ath_pct:.0f}%")
+            # ATH — compare against PREVIOUS ATH (before this week's update)
+            prev_ath = 0
+            if ath_info and wallet_name in ath_info.get("wallet_prev_ath", {}):
+                prev_ath = ath_info["wallet_prev_ath"][wallet_name]
+            
+            if prev_ath > 0:
+                if current_value > prev_ath:
+                    # Genuinely a new high this week
+                    parts.append("🏆 ATH!")
+                else:
+                    # Below previous ATH — show how far
+                    from_ath_pct = ((current_value - prev_ath) / prev_ath * 100)
+                    parts.append(f"от ATH: {from_ath_pct:.0f}%")
+            # If prev_ath == 0, this is the first record ever — show nothing
             
             return " · ".join(parts) if parts else ""
         
@@ -767,8 +777,7 @@ class WalletTracker:
             
             msg += f"\n<b>{wallet_label(name)}:</b>\n"
             msg += f"├ План: {self.format_number(wallet_plan)}\n"
-            msg += f"├ Факт: {self.format_number(wallet_fact)}\n"
-            msg += f"├ {wallet_sign}${wallet_diff:,.0f} ({wallet_sign}{wallet_pct:.1f}%)\n"
+            msg += f"├ Факт: {self.format_number(wallet_fact)} ({wallet_sign}{wallet_pct:.1f}%)\n"
             
             # Dynamics
             dynamics = get_wallet_dynamics(name, wallet_fact)
@@ -931,7 +940,7 @@ class WalletTracker:
         last_week = self.get_last_week_data(history)
         month_start = self.get_month_start_data(history)
         
-        record = self.add_record(history, total_usd, total_plan_usd, wallet_details)
+        record, ath_info = self.add_record(history, total_usd, total_plan_usd, wallet_details)
         
         # Save monthly snapshot if first week
         if self.is_first_week_of_month():
@@ -940,7 +949,7 @@ class WalletTracker:
         self.save_history(history)
         
         # Build and send message
-        message = self.build_message(record, last_week, month_start, whitelist_report, history, all_tokens)
+        message = self.build_message(record, last_week, month_start, whitelist_report, history, all_tokens, ath_info)
         await self.send_telegram(message)
         
         logger.info("✅ Done!")
