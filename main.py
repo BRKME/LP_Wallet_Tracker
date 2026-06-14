@@ -48,9 +48,46 @@ class WalletTracker:
         try:
             from playwright.async_api import async_playwright
             
+            # Collect token data from intercepted API responses
+            intercepted_tokens = []
+            
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
+                
+                # Intercept DeBank API responses to capture LP positions
+                async def handle_response(response):
+                    try:
+                        url_r = response.url
+                        # Token list endpoint
+                        if "all_token_list" in url_r or "token_list" in url_r:
+                            data = await response.json()
+                            items = data.get("data", []) or []
+                            for t in items:
+                                sym = t.get("optimized_symbol") or t.get("symbol", "")
+                                amount = t.get("amount", 0) or 0
+                                price = t.get("price", 0) or 0
+                                val = amount * price
+                                if val > 0.01:
+                                    intercepted_tokens.append({"symbol": sym.strip(), "value": val})
+                        # Protocol positions endpoint
+                        elif "complex_protocol_list" in url_r or "protocol_list" in url_r:
+                            data = await response.json()
+                            protocols = data.get("data", []) or []
+                            for proto in protocols:
+                                for item in proto.get("portfolio_item_list", []) or []:
+                                    detail = item.get("detail", {})
+                                    for t in detail.get("supply_token_list", []) or []:
+                                        sym = t.get("optimized_symbol") or t.get("symbol", "")
+                                        amount = t.get("amount", 0) or 0
+                                        price = t.get("price", 0) or 0
+                                        val = amount * price
+                                        if val > 0.01:
+                                            intercepted_tokens.append({"symbol": sym.strip(), "value": val})
+                    except:
+                        pass
+                
+                page.on("response", handle_response)
                 
                 url = f"https://debank.com/profile/{address}"
                 logger.info(f"Scraping {url}")
@@ -60,41 +97,25 @@ class WalletTracker:
                 # Wait for balance to load
                 await page.wait_for_selector('[class*="HeaderInfo_totalAssetInner"]', timeout=30000)
                 
+                # Give time for all API calls to complete
+                await page.wait_for_timeout(3000)
+                
                 # Get total balance text
                 balance_el = await page.query_selector('[class*="HeaderInfo_totalAssetInner"]')
                 if balance_el:
                     balance_text = await balance_el.inner_text()
-                    # Parse "$12,345.67\n+0.79%" -> 12345.67
-                    # Take first line only
                     first_line = balance_text.split('\n')[0].strip()
-                    # Remove $ and commas
                     first_line = first_line.replace('$', '').replace(',', '').strip()
                     total_usd = float(first_line)
                     logger.info(f"Scraped balance: ${total_usd:,.2f}")
                 else:
                     total_usd = 0
                 
-                # Get tokens (plain wallet tokens only — LP positions fetched via API)
-                tokens = []
-                token_elements = await page.query_selector_all('[class*="TokenCell_tokenCell"]')
-                for el in token_elements[:20]:
-                    try:
-                        symbol_el = await el.query_selector('[class*="TokenCell_tokenSymbol"]')
-                        value_el = await el.query_selector('[class*="TokenCell_tokenValue"]')
-                        if symbol_el and value_el:
-                            symbol = await symbol_el.inner_text()
-                            value_text = await value_el.inner_text()
-                            value_text = value_text.split('\n')[0].replace('$', '').replace(',', '').strip()
-                            tokens.append({
-                                'symbol': symbol.strip(),
-                                'value': float(value_text) if value_text else 0
-                            })
-                    except:
-                        pass
-                
                 await browser.close()
                 
-                return {"total_usd": total_usd, "tokens": tokens}
+                # Use intercepted tokens (includes LP positions)
+                logger.info(f"Intercepted {len(intercepted_tokens)} tokens from API")
+                return {"total_usd": total_usd, "tokens": intercepted_tokens}
                 
         except ImportError:
             logger.warning("Playwright not installed, skipping scrape")
