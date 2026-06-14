@@ -746,6 +746,14 @@ class WalletTracker:
             
             return " · ".join(parts) if parts else ""
         
+        # Asset symbol normalization — group wrappers under canonical name
+        ASSET_ALIASES = {
+            "WBTC": "BTC", "BTCB": "BTC", "TBTC": "BTC", "CBBTC": "BTC",
+            "BTC.B": "BTC", "RENBTC": "BTC", "SBTC": "BTC",
+            "WETH": "ETH", "STETH": "ETH", "WSTETH": "ETH", "WEETH": "ETH",
+            "USDC.E": "USDC", "USDT.E": "USDT",
+        }
+        
         # Helper to format asset split for a wallet
         def format_assets(tokens):
             if not tokens:
@@ -753,6 +761,7 @@ class WalletTracker:
             by_symbol = {}
             for t in tokens:
                 sym = (t.get("symbol", "???") or "???").upper()
+                sym = ASSET_ALIASES.get(sym, sym)  # normalize wrappers
                 val = t.get("value", 0) or 0
                 if val > 0:
                     by_symbol[sym] = by_symbol.get(sym, 0) + val
