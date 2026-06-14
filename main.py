@@ -44,48 +44,69 @@ class WalletTracker:
     # ============ DATA FETCHING ============
     
     async def get_wallet_balance_scrape(self, address: str) -> dict:
-        """Scrape wallet balance directly from DeBank website"""
+        """Scrape wallet balance + tokens from DeBank via API interception"""
         try:
             from playwright.async_api import async_playwright
             
-            # Collect token data from intercepted API responses
             intercepted_tokens = []
+            seen_endpoints = []  # for diagnostics
+            
+            def _extract_token(t):
+                """Extract {symbol, value} from a DeBank token object"""
+                sym = t.get("optimized_symbol") or t.get("symbol") or t.get("display_symbol") or ""
+                amount = t.get("amount", 0) or 0
+                price = t.get("price", 0) or 0
+                val = amount * price
+                if val > 0.01 and sym:
+                    return {"symbol": sym.strip(), "value": val}
+                return None
             
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
                 
-                # Intercept DeBank API responses to capture LP positions
                 async def handle_response(response):
+                    url_r = response.url
+                    if "api.debank.com" not in url_r:
+                        return
+                    # Record endpoint for diagnostics
+                    endpoint = url_r.split("api.debank.com")[-1].split("?")[0]
+                    seen_endpoints.append(endpoint)
                     try:
-                        url_r = response.url
-                        # Token list endpoint
-                        if "all_token_list" in url_r or "token_list" in url_r:
-                            data = await response.json()
-                            items = data.get("data", []) or []
-                            for t in items:
-                                sym = t.get("optimized_symbol") or t.get("symbol", "")
-                                amount = t.get("amount", 0) or 0
-                                price = t.get("price", 0) or 0
-                                val = amount * price
-                                if val > 0.01:
-                                    intercepted_tokens.append({"symbol": sym.strip(), "value": val})
-                        # Protocol positions endpoint
-                        elif "complex_protocol_list" in url_r or "protocol_list" in url_r:
-                            data = await response.json()
-                            protocols = data.get("data", []) or []
-                            for proto in protocols:
-                                for item in proto.get("portfolio_item_list", []) or []:
-                                    detail = item.get("detail", {})
-                                    for t in detail.get("supply_token_list", []) or []:
-                                        sym = t.get("optimized_symbol") or t.get("symbol", "")
-                                        amount = t.get("amount", 0) or 0
-                                        price = t.get("price", 0) or 0
-                                        val = amount * price
-                                        if val > 0.01:
-                                            intercepted_tokens.append({"symbol": sym.strip(), "value": val})
-                    except:
-                        pass
+                        data = await response.json()
+                    except Exception:
+                        return
+                    if not isinstance(data, dict):
+                        return
+                    payload = data.get("data")
+                    if payload is None:
+                        return
+                    
+                    # Case A: token list (data is a list of tokens)
+                    if isinstance(payload, list):
+                        for t in payload:
+                            if not isinstance(t, dict):
+                                continue
+                            # Plain token?
+                            tok = _extract_token(t)
+                            if tok:
+                                intercepted_tokens.append(tok)
+                            # Protocol object with portfolio_item_list?
+                            for pi in t.get("portfolio_item_list", []) or []:
+                                detail = pi.get("detail", {}) or {}
+                                for st in detail.get("supply_token_list", []) or []:
+                                    tok2 = _extract_token(st)
+                                    if tok2:
+                                        intercepted_tokens.append(tok2)
+                    
+                    # Case B: dict with token_list/coin_list inside
+                    elif isinstance(payload, dict):
+                        for key in ("token_list", "coin_list", "tokens"):
+                            for t in payload.get(key, []) or []:
+                                if isinstance(t, dict):
+                                    tok = _extract_token(t)
+                                    if tok:
+                                        intercepted_tokens.append(tok)
                 
                 page.on("response", handle_response)
                 
@@ -93,19 +114,19 @@ class WalletTracker:
                 logger.info(f"Scraping {url}")
                 
                 await page.goto(url, wait_until="networkidle", timeout=60000)
-                
-                # Wait for balance to load
                 await page.wait_for_selector('[class*="HeaderInfo_totalAssetInner"]', timeout=30000)
                 
-                # Give time for all API calls to complete
-                await page.wait_for_timeout(3000)
+                # Scroll to trigger lazy-loading of all positions
+                for _ in range(5):
+                    await page.mouse.wheel(0, 2000)
+                    await page.wait_for_timeout(800)
+                await page.wait_for_timeout(2000)
                 
-                # Get total balance text
+                # Get total balance
                 balance_el = await page.query_selector('[class*="HeaderInfo_totalAssetInner"]')
                 if balance_el:
                     balance_text = await balance_el.inner_text()
-                    first_line = balance_text.split('\n')[0].strip()
-                    first_line = first_line.replace('$', '').replace(',', '').strip()
+                    first_line = balance_text.split('\n')[0].strip().replace('$', '').replace(',', '').strip()
                     total_usd = float(first_line)
                     logger.info(f"Scraped balance: ${total_usd:,.2f}")
                 else:
@@ -113,8 +134,11 @@ class WalletTracker:
                 
                 await browser.close()
                 
-                # Use intercepted tokens (includes LP positions)
+                # Diagnostics
+                unique_endpoints = sorted(set(seen_endpoints))
+                logger.info(f"DeBank endpoints seen: {unique_endpoints}")
                 logger.info(f"Intercepted {len(intercepted_tokens)} tokens from API")
+                
                 return {"total_usd": total_usd, "tokens": intercepted_tokens}
                 
         except ImportError:
@@ -473,16 +497,10 @@ class WalletTracker:
     async def get_wallet_balance(self, address: str) -> dict:
         """Get wallet balance, trying multiple sources"""
         # Try scraping DeBank directly (most accurate for total)
+        # Tokens (incl. LP positions) are captured via API interception inside scrape
         logger.info("Trying to scrape DeBank...")
         result = await self.get_wallet_balance_scrape(address)
         if result and result.get('total_usd', 0) > 0:
-            # Get underlying LP tokens (money is in LP positions, not plain tokens)
-            lp_tokens = await self.get_lp_tokens_debank(address)
-            if lp_tokens:
-                # Combine plain tokens + LP tokens
-                existing = result.get('tokens', [])
-                result['tokens'] = existing + lp_tokens
-                logger.info(f"Added {len(lp_tokens)} LP tokens (total {len(result['tokens'])})")
             return result
         
         # Try Covalent API (reliable for GitHub Actions)
