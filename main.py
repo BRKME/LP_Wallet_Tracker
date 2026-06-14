@@ -380,10 +380,17 @@ class WalletTracker:
     
     async def get_wallet_balance(self, address: str) -> dict:
         """Get wallet balance, trying multiple sources"""
-        # Try scraping DeBank directly (most accurate)
+        # Try scraping DeBank directly (most accurate for total)
         logger.info("Trying to scrape DeBank...")
         result = await self.get_wallet_balance_scrape(address)
         if result and result.get('total_usd', 0) > 0:
+            # If scrape didn't get tokens, try to get them from Covalent
+            if not result.get('tokens'):
+                logger.info("Scrape got total but no tokens, fetching from Covalent...")
+                cov_result = await self.get_wallet_balance_covalent(address)
+                if cov_result and cov_result.get('tokens'):
+                    result['tokens'] = cov_result['tokens']
+                    logger.info(f"Added {len(result['tokens'])} tokens from Covalent")
             return result
         
         # Try Covalent API (reliable for GitHub Actions)
