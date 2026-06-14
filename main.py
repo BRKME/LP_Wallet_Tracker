@@ -751,7 +751,9 @@ class WalletTracker:
             "WBTC": "BTC", "BTCB": "BTC", "TBTC": "BTC", "CBBTC": "BTC",
             "BTC.B": "BTC", "RENBTC": "BTC", "SBTC": "BTC",
             "WETH": "ETH", "STETH": "ETH", "WSTETH": "ETH", "WEETH": "ETH",
-            "USDC.E": "USDC", "USDT.E": "USDT",
+            "USDT": "USD", "USDC": "USD", "DAI": "USD", "BUSD": "USD",
+            "USDC.E": "USD", "USDT.E": "USD", "USDE": "USD", "USD+": "USD",
+            "FDUSD": "USD", "TUSD": "USD", "USDD": "USD",
         }
         
         # Helper to format asset split for a wallet
