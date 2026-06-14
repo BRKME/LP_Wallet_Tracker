@@ -74,20 +74,19 @@ class WalletTracker:
                 else:
                     total_usd = 0
                 
-                # Get tokens (optional, for whitelist check)
+                # Get tokens (plain wallet tokens only — LP positions fetched via API)
                 tokens = []
                 token_elements = await page.query_selector_all('[class*="TokenCell_tokenCell"]')
-                for el in token_elements[:20]:  # Limit to 20
+                for el in token_elements[:20]:
                     try:
                         symbol_el = await el.query_selector('[class*="TokenCell_tokenSymbol"]')
                         value_el = await el.query_selector('[class*="TokenCell_tokenValue"]')
                         if symbol_el and value_el:
                             symbol = await symbol_el.inner_text()
                             value_text = await value_el.inner_text()
-                            # Take first line, remove $ and commas
                             value_text = value_text.split('\n')[0].replace('$', '').replace(',', '').strip()
                             tokens.append({
-                                'symbol': symbol,
+                                'symbol': symbol.strip(),
                                 'value': float(value_text) if value_text else 0
                             })
                     except:
@@ -180,6 +179,50 @@ class WalletTracker:
         except Exception as e:
             logger.error(f"Error fetching DeBank Pro data: {e}")
             return None
+    
+    async def get_lp_tokens_debank(self, address: str) -> list:
+        """Fetch underlying tokens from LP/protocol positions via DeBank API"""
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/json",
+                "Origin": "https://debank.com",
+                "Referer": "https://debank.com/"
+            }
+            
+            tokens = []
+            # complex_protocol_list returns DeFi positions (LP, lending, etc.)
+            url = f"https://api.debank.com/user/complex_protocol_list?addr={address.lower()}"
+            async with self.session.get(url, headers=headers, timeout=30) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    protocols = data.get('data', []) or []
+                    
+                    for proto in protocols:
+                        portfolio_items = proto.get('portfolio_item_list', []) or []
+                        for item in portfolio_items:
+                            # Supply tokens (the assets in the LP position)
+                            detail = item.get('detail', {})
+                            supply_tokens = detail.get('supply_token_list', []) or []
+                            for t in supply_tokens:
+                                symbol = t.get('optimized_symbol') or t.get('symbol', '')
+                                amount = t.get('amount', 0) or 0
+                                price = t.get('price', 0) or 0
+                                value = amount * price
+                                if value > 0.01:
+                                    tokens.append({
+                                        'symbol': symbol.strip(),
+                                        'value': value
+                                    })
+                    
+                    logger.info(f"DeBank LP positions: {len(tokens)} underlying tokens")
+                else:
+                    logger.warning(f"DeBank complex_protocol_list: {resp.status}")
+            
+            return tokens
+        except Exception as e:
+            logger.warning(f"LP tokens fetch error: {e}")
+            return []
     
     async def get_wallet_balance_debank_public(self, address: str) -> dict:
         """Fetch wallet balance from DeBank public API (free)"""
@@ -384,13 +427,13 @@ class WalletTracker:
         logger.info("Trying to scrape DeBank...")
         result = await self.get_wallet_balance_scrape(address)
         if result and result.get('total_usd', 0) > 0:
-            # If scrape didn't get tokens, try to get them from Covalent
-            if not result.get('tokens'):
-                logger.info("Scrape got total but no tokens, fetching from Covalent...")
-                cov_result = await self.get_wallet_balance_covalent(address)
-                if cov_result and cov_result.get('tokens'):
-                    result['tokens'] = cov_result['tokens']
-                    logger.info(f"Added {len(result['tokens'])} tokens from Covalent")
+            # Get underlying LP tokens (money is in LP positions, not plain tokens)
+            lp_tokens = await self.get_lp_tokens_debank(address)
+            if lp_tokens:
+                # Combine plain tokens + LP tokens
+                existing = result.get('tokens', [])
+                result['tokens'] = existing + lp_tokens
+                logger.info(f"Added {len(lp_tokens)} LP tokens (total {len(result['tokens'])})")
             return result
         
         # Try Covalent API (reliable for GitHub Actions)
